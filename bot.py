@@ -1,39 +1,24 @@
+import os
 import sqlite3
 import requests
+from flask import Flask, request
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, MessageHandler, CommandHandler, CallbackQueryHandler, filters, ContextTypes
 
-# 🔐 TU TOKEN (PEGÁ EL NUEVO)
-TOKEN = "8695750211:AAHDfL-ik8tX4fuWev_WI66dX4-GlzARy0c"
+TOKEN = os.environ.get("8695750211:AAHDfL-ik8tX4fuWev_WI66dX4-GlzARy0c")
 
-# 💰 AFILIADOS
 AMAZON_ID = "radarvip01-20"
 ALI_ID = "default"
 
-# 🇦🇷 TUS PRODUCTOS (PRIORIDAD)
 PRODUCTOS_AR = [
     {"nombre": "🎣 Caña Kunnan Horizon", "link": "https://articulo.mercadolibre.com.ar/MLA-1714239051-cana-de-pesca-mosca-kunnan-horizon-_JM"},
     {"nombre": "🚗 Peugeot 207 Sedan", "link": "https://auto.mercadolibre.com.ar/MLA-3076197834-peugeot-207-14-sedan-active-75cv-_JM"},
-    {"nombre": "🔊 Amplificador SS Pro 30W", "link": "https://articulo.mercadolibre.com.ar/MLA-3082496808-amplificador-ss-pro-ss-30st-multiproposito-de-30w-_JM"},
-    {"nombre": "🎸 Amplificador Fender Stage", "link": "https://articulo.mercadolibre.com.ar/MLA-3082510664-amplificador-fender-stage-112-se-_JM"},
-    {"nombre": "🚴 Bicicleta Oxea Hunter", "link": "https://articulo.mercadolibre.com.ar/MLA-3082608454-bicicleta-mountain-bike-oxea-hunter-_JM"},
-    {"nombre": "🎣 Caña Ranger Fiber", "link": "https://articulo.mercadolibre.com.ar/MLA-3082612028-cana-de-pesca-ranger-fiber-glass-ran-1952-195m-_JM"},
-    {"nombre": "🚴 MTB Motomel Maxam", "link": "https://articulo.mercadolibre.com.ar/MLA-3082645566-mountain-bike-motomel-maxam-_JM"}
 ]
 
-# 🌎 MERCADOS ML
-PAISES = {
-    "AR": "MLA",
-    "CL": "MLC",
-    "MX": "MLM",
-    "CO": "MCO",
-    "PE": "MPE",
-    "BR": "MLB",
-    "UY": "MLU",
-    "OTRO": "MLM"
-}
+PAISES = {"AR": "MLA", "CL": "MLC", "OTRO": "MLM"}
 
-# 🧠 BASE DE DATOS
+app_flask = Flask(__name__)
+
 def db():
     return sqlite3.connect("bot.db")
 
@@ -66,7 +51,6 @@ def update_consultas(user_id, n):
     conn.commit()
     conn.close()
 
-# 🔗 LINKS AFILIADOS
 def amazon(q):
     return f"https://www.amazon.com/s?k={q}&tag={AMAZON_ID}"
 
@@ -79,104 +63,67 @@ def buscar_ml(site, q):
     if r.get("results"):
         item = r["results"][0]
         return f"{item['title']}\n💲 {item['price']}\n{item['permalink']}"
-    return "No encontré resultados en MercadoLibre"
+    return "No encontré resultados"
 
-# 🚀 START
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     botones = [
         [InlineKeyboardButton("🇦🇷 Argentina", callback_data="AR")],
         [InlineKeyboardButton("🇨🇱 Chile", callback_data="CL")],
-        [InlineKeyboardButton("🇲🇽 México", callback_data="MX")],
         [InlineKeyboardButton("🌎 Otro", callback_data="OTRO")]
     ]
-    await update.message.reply_text(
-        "🔥 Bienvenido! Te ayudo a encontrar las mejores ofertas.\n\n¿Desde qué país comprás?",
-        reply_markup=InlineKeyboardMarkup(botones)
-    )
+    await update.message.reply_text("¿Desde qué país comprás?", reply_markup=InlineKeyboardMarkup(botones))
 
-# 🌎 SET PAÍS
 async def set_pais(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    user_id = str(query.from_user.id)
-    pais = query.data
-
+    user_id = str(update.callback_query.from_user.id)
+    pais = update.callback_query.data
     save_user(user_id, pais)
+    await update.callback_query.answer()
+    await update.callback_query.message.reply_text("¿Qué estás buscando?")
 
-    await query.answer()
-    await query.message.reply_text("Perfecto 👍\n\n¿Qué estás buscando?")
-
-# 🔎 BUSCAR
 async def buscar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.effective_user.id)
     user = get_user(user_id)
 
     if not user:
-        await update.message.reply_text("👉 Escribí /start primero")
-        return
-
-    consultas = user[2]
-
-    if consultas <= 0:
-        await update.message.reply_text(
-            "🚫 Te quedaste sin búsquedas\n\n💳 USD 5 = 20 búsquedas\n👉 Escribí /pagar"
-        )
+        await update.message.reply_text("Escribí /start primero")
         return
 
     texto = update.message.text
     q = texto.replace(" ", "+")
 
-    update_consultas(user_id, consultas - 1)
-
     site = PAISES[user[1]]
 
-    mensaje = "🔥 Encontré esto para vos 👇\n\n"
+    msg = "🔥 Resultado:\n\n"
 
-    # 🇦🇷 OPORTUNIDADES PROPIAS
     if user[1] == "AR":
-        mensaje += "🔥 OPORTUNIDADES (RECOMENDADO)\n"
-        for p in PRODUCTOS_AR[:3]:
-            mensaje += f"{p['nombre']}\n{p['link']}\n\n"
+        for p in PRODUCTOS_AR:
+            msg += f"{p['nombre']}\n{p['link']}\n\n"
 
-    # 🛒 ML
-    mensaje += "🛒 MercadoLibre\n"
-    mensaje += buscar_ml(site, q) + "\n\n"
+    msg += buscar_ml(site, q) + "\n\n"
+    msg += amazon(q) + "\n\n"
+    msg += ali(q)
 
-    # 🟡 AMAZON
-    mensaje += f"🟡 Amazon\n{amazon(q)}\n\n"
+    await update.message.reply_text(msg)
 
-    # 🔴 ALIEXPRESS
-    mensaje += f"🔴 AliExpress\n{ali(q)}\n"
-
-    if consultas <= 2:
-        mensaje += "\n\n⚠️ Te quedan pocas búsquedas"
-
-    await update.message.reply_text(mensaje)
-
-# 💳 PAGO
-async def pagar(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "💳 Pago de acceso\n\nUSD 5 = 20 búsquedas\n\n(Después integramos MercadoPago o Stripe)"
-    )
-
-# 📊 STATS
-async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    conn = db()
-    c = conn.cursor()
-    total = c.execute("SELECT COUNT(*) FROM users").fetchone()[0]
-    conn.close()
-
-    await update.message.reply_text(f"📊 Usuarios registrados: {total}")
-
-# 🚀 INICIO
-init_db()
-
+# TELEGRAM APP
 app = ApplicationBuilder().token(TOKEN).build()
-
 app.add_handler(CommandHandler("start", start))
-app.add_handler(CommandHandler("pagar", pagar))
-app.add_handler(CommandHandler("stats", stats))
 app.add_handler(CallbackQueryHandler(set_pais))
 app.add_handler(MessageHandler(filters.TEXT, buscar))
 
-print("🔥 BOT FUNCIONANDO...")
-app.run_polling()
+# WEBHOOK
+@app_flask.route(f"/{TOKEN}", methods=["POST"])
+async def webhook():
+    data = request.get_json()
+    update = Update.de_json(data, app.bot)
+    await app.process_update(update)
+    return "ok"
+
+@app_flask.route("/")
+def home():
+    return "Bot activo"
+
+if __name__ == "__main__":
+    init_db()
+    app.bot.set_webhook(url=os.environ.get("WEBHOOK_URL"))
+    app_flask.run(host="0.0.0.0", port=8080)
